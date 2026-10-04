@@ -132,9 +132,16 @@ def process_video(video_path, progress=None, **kw):
         # 4. 抽代理视频 + 算画面运动量
         proxy = os.path.join(tmp, "proxy.mp4")
         report(0.25, "抽取代理视频（用于画面运动量分析）…")
-        _run([_ffmpeg(), "-y", "-loglevel", "error", "-noautorotate", "-i", video_path,
-              "-vf", "fps=%d,scale=%d:-2" % (cfg["proxy_fps"], cfg["proxy_scale"]),
-              "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "30", proxy])
+        # 4K/HEVC 视频优先走硬件加速解码，否则 CPU 解码极慢甚至被系统终止
+        vf = "fps=%d,scale=%d:-2,format=yuv420p" % (cfg["proxy_fps"], cfg["proxy_scale"])
+        try:
+            _run([_ffmpeg(), "-y", "-loglevel", "error", "-hwaccel", "auto",
+                  "-noautorotate", "-i", video_path, "-vf", vf,
+                  "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "30", proxy])
+        except subprocess.CalledProcessError:
+            report(0.28, "硬件加速不可用，改用 CPU 解码…")
+            _run([_ffmpeg(), "-y", "-loglevel", "error", "-noautorotate", "-i", video_path,
+                  "-vf", vf, "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "30", proxy])
 
         report(0.35, "计算画面运动量…")
         cap = cv2.VideoCapture(proxy)
