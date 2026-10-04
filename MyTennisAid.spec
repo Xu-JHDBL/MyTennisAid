@@ -10,7 +10,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['torch', 'torchvision', 'ultralytics', 'gradio', 'matplotlib', 'pandas'],
+    excludes=['torch', 'torchvision', 'ultralytics', 'gradio', 'matplotlib', 'pandas', 'imageio_ffmpeg'],
     noarchive=False,
     optimize=0,
 )
