@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TennisAid · 网球精彩片段识别</title>
+<style>
+  :root {
+    --bg: #121216; --card: #1d1d24; --text: #f2f2f5; --muted: #9a9aa5;
+    --accent: #c8f542; --accent-dim: #2a3310; --line: #2b2b33;
+    --ok: #7bd88f; --err: #ff6b6b;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, "PingFang SC", "Segoe UI", Roboto, sans-serif;
+    min-height: 100vh; display: flex; justify-content: center;
+  }
+  .container { width: 100%; max-width: 560px; padding: 28px 20px 48px; display: flex; flex-direction: column; gap: 22px; }
+  h1 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: .3px; }
+  h1 span { color: var(--accent); }
+  .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+  input[type=text] {
+    width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line);
+    background: #14141a; color: var(--text); font-size: 14px; outline: none;
+  }
+  input[type=text]:focus { border-color: var(--accent); }
+
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .btn {
+    flex: 1; min-width: 120px; padding: 12px 18px; border-radius: 10px; border: none;
+    background: var(--accent); color: #121216; font-size: 15px; font-weight: 700;
+    cursor: pointer; transition: opacity .15s;
+  }
+  .btn:hover { opacity: .85; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn.ghost { background: transparent; border: 1px solid var(--line); color: var(--muted); }
+
+  .progress-wrap { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
+  .progress-bar { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+  .status { font-size: 14px; min-height: 20px; }
+  .status.err { color: var(--err); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  .hits { color: var(--accent); font-weight: 700; }
+
+  .clip { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .clip:last-child { border-bottom: none; }
+  .clip a { color: var(--accent); text-decoration: none; font-weight: 600; }
+  .clip .meta { color: var(--muted); font-size: 12px; }
+
+  .hint { font-size: 12px; color: var(--muted); line-height: 1.6; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>🎾 <span>TennisAid</span> 精彩片段识别</h1>
+    <div class="sub">自动找出全场录像里的多拍回合 · 全程本地运行，视频不上传</div>
+  </header>
+
+  <div class="card">
+    <label>视频文件完整路径</label>
+    <input type="text" id="path" placeholder="例如 C:\Users\...\t_20261003.mp4">
+    <div style="height:12px"></div>
+    <div class="row">
+      <button class="btn" id="btn" onclick="start()">开始分析</button>
+    </div>
+    <div style="height:16px"></div>
+    <div class="progress-wrap hidden" id="pwrap"><div class="progress-bar" id="pbar"></div></div>
+    <div style="height:10px"></div>
+    <div class="status" id="status"></div>
+  </div>
+
+  <div class="card hidden" id="resultCard">
+    <label>识别结果</label>
+    <table id="table">
+      <thead><tr><th>#</th><th>开始</th><th>结束</th><th>拍数</th><th>时长</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="card hidden" id="clipCard">
+    <label>精彩片段（点击下载）</label>
+    <div id="clips"></div>
+    <div style="height:10px"></div>
+    <div class="hint">片段已保存到：<span id="savePath" style="color:var(--accent)"></span></div>
+  </div>
+
+  <div class="hint">
+    提示：视频较大时建议直接填本地路径（免去复制）。若未检测到结果，可尝试降低拍数下限——暂需改代码参数。
+  </div>
+
+  <div class="row">
+    <button class="btn ghost" onclick="quit()">退出程序</button>
+  </div>
+</div>
+
+<script>
+  const $ = id => document.getElementById(id);
+
+  async function quit() {
+    try { await fetch('/shutdown', { method:'POST' }); } catch(e) {}
+    document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#9a9aa5;font-family:system-ui">程序已退出，可关闭此页面。</div>';
+  }
+
+
+  function fmt(sec) { return Math.floor(sec/60) + ':' + String(Math.floor(sec%60)).padStart(2,'0'); }
+
+  async function start() {
+    const path = $('path').value.trim();
+    if (!path) { setStatus('❌ 请先填写视频路径', true); return; }
+    $('btn').disabled = true;
+    $('pwrap').classList.remove('hidden');
+    $('resultCard').classList.add('hidden');
+    $('clipCard').classList.add('hidden');
+    setStatus('正在提交…', false);
+    try {
+      const r = await fetch('/analyze', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({path}) });
+      const d = await r.json();
+      if (d.error) { setStatus('❌ ' + d.error, true); $('btn').disabled = false; return; }
+      poll(d.job);
+    } catch(e) { setStatus('❌ 请求失败：' + e, true); $('btn').disabled = false; }
+  }
+
+  async function poll(job) {
+    try {
+      const r = await fetch('/status?job=' + job);
+      const d = await r.json();
+      if (d.error) { setStatus('❌ ' + d.error, true); $('btn').disabled = false; return; }
+      $('pbar').style.width = d.progress + '%';
+      setStatus((d.progress < 100 ? '处理中 ' + d.progress + '% · ' : '') + (d.msg || ''), false);
+      if (d.done) {
+        $('btn').disabled = false;
+        if (d.error) { setStatus('❌ ' + d.error, true); }
+        else if (!d.result || !d.result.length) { setStatus('⚠️ 未找到符合条件的回合', false); }
+        else { showResults(d.result, d.clips || [], job, d.clips_dir); }
+      } else {
+        setTimeout(() => poll(job), 1000);
+      }
+    } catch(e) { setStatus('❌ 状态查询失败：' + e, true); $('btn').disabled = false; }
+  }
+
+  function setStatus(msg, isErr) {
+    const s = $('status'); s.textContent = msg; s.className = 'status' + (isErr ? ' err' : '');
+  }
+
+  function showResults(segs, clips, job, clipsDir) {
+    const tb = $('table').querySelector('tbody'); tb.innerHTML = '';
+    segs.forEach((s, i) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td>'+(i+1)+'</td><td>'+fmt(s.start)+'</td><td>'+fmt(s.end)+'</td>'+
+                     '<td class="hits">'+s.hits+' 拍</td><td>'+s.duration+'s</td>';
+      tb.appendChild(tr);
+    });
+    $('resultCard').classList.remove('hidden');
+
+    const cc = $('clips'); cc.innerHTML = '';
+    clips.forEach((f) => {
+      const div = document.createElement('div'); div.className = 'clip';
+      div.innerHTML = '<span>🎬 '+f+'</span><a href="/clips/'+job+'/'+encodeURIComponent(f)+'" download>下载</a>';
+      cc.appendChild(div);
+    });
+    if (clipsDir) {
+      $('savePath').textContent = clipsDir;
+    }
+    $('clipCard').classList.remove('hidden');
+    setStatus('✅ 完成，共 ' + segs.length + ' 个精彩片段', false);
+  }
+</script>
+</body>
+</html>
